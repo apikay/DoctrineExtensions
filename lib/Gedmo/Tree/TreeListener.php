@@ -259,6 +259,23 @@ class TreeListener extends MappedEventSubscriber
     }
 
     /**
+     * Mapps additional metadata
+     *
+     * @param EventArgs $eventArgs
+     */
+    public function loadClassMetadata(EventArgs $eventArgs)
+    {
+        $ea = $this->getEventAdapter($eventArgs);
+        $om = $ea->getObjectManager();
+        $meta = $eventArgs->getClassMetadata();
+        $this->loadMetadataForObjectClass($om, $meta);
+        if (isset(self::$configurations[$this->name][$meta->name]) && self::$configurations[$this->name][$meta->name]) {
+            $this->getStrategy($om, $meta->name)->processMetadataLoad($om, $meta);
+            $this->getCustomStrategy('materializedPath')->processMetadataLoad($om, $meta);
+        }
+    }
+
+    /**
      * {@inheritDoc}
      */
     protected function getNamespace()

@@ -78,10 +78,10 @@ class TreeListener extends MappedEventSubscriber
                 $managerName = 'ODM\\MongoDB';
             }
             if (!isset($this->strategyInstances[$config['strategy']])) {
-                $strategyClass = $this->getNamespace().'\\Strategy\\'.$managerName.'\\'.ucfirst($config['strategy']);
+                $strategyClass = $this->getNamespace() . '\\Strategy\\' . $managerName . '\\' . ucfirst($config['strategy']);
 
                 if (!class_exists($strategyClass)) {
-                    throw new \Gedmo\Exception\InvalidArgumentException($managerName." TreeListener does not support tree type: {$config['strategy']}");
+                    throw new \Gedmo\Exception\InvalidArgumentException($managerName . " TreeListener does not support tree type: {$config['strategy']}");
                 }
                 $this->strategyInstances[$config['strategy']] = new $strategyClass($this);
             }
@@ -91,12 +91,21 @@ class TreeListener extends MappedEventSubscriber
         return $this->strategyInstances[$this->strategies[$class]];
     }
 
-    /**
-     * Looks for Tree objects being updated
-     * for further processing
-     *
-     * @param EventArgs $args
-     */
+    public function getCustomStrategy($strategy)
+    {
+        $managerName = 'ORM';
+        if (!isset($this->strategyInstances[$strategy])) {
+            $strategyClass = $this->getNamespace() . '\\Strategy\\' . $managerName . '\\' . ucfirst($strategy);
+
+            if (!class_exists($strategyClass)) {
+                throw new \Gedmo\Exception\InvalidArgumentException($managerName . " TreeListener does not support tree type: {$strategy}");
+            }
+            $this->strategyInstances[$strategy] = new $strategyClass($this);
+        }
+
+        return $this->strategyInstances[$strategy];
+    }
+
     public function onFlush(EventArgs $args)
     {
         $ea = $this->getEventAdapter($args);
@@ -109,6 +118,7 @@ class TreeListener extends MappedEventSubscriber
             if ($this->getConfiguration($om, $meta->name)) {
                 $this->usedClassesOnFlush[$meta->name] = null;
                 $this->getStrategy($om, $meta->name)->processScheduledInsertion($om, $object, $ea);
+                $this->getCustomStrategy('materializedPath')->processScheduledInsertion($om, $object, $ea);
                 $ea->recomputeSingleObjectChangeSet($uow, $meta, $object);
             }
         }
@@ -118,6 +128,7 @@ class TreeListener extends MappedEventSubscriber
             if ($this->getConfiguration($om, $meta->name)) {
                 $this->usedClassesOnFlush[$meta->name] = null;
                 $this->getStrategy($om, $meta->name)->processScheduledUpdate($om, $object, $ea);
+                $this->getCustomStrategy('materializedPath')->processScheduledUpdate($om, $object, $ea);
             }
         }
 
@@ -126,6 +137,7 @@ class TreeListener extends MappedEventSubscriber
             if ($this->getConfiguration($om, $meta->name)) {
                 $this->usedClassesOnFlush[$meta->name] = null;
                 $this->getStrategy($om, $meta->name)->processScheduledDelete($om, $object);
+                $this->getCustomStrategy('materializedPath')->processScheduledDelete($om, $object);
             }
         }
 
@@ -148,6 +160,7 @@ class TreeListener extends MappedEventSubscriber
 
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPreRemove($om, $object);
+            $this->getCustomStrategy('materializedPath')->processPreRemove($om, $object);
         }
     }
 
@@ -165,6 +178,7 @@ class TreeListener extends MappedEventSubscriber
 
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPrePersist($om, $object);
+            $this->getCustomStrategy('materializedPath')->processPrePersist($om, $object);
         }
     }
 
@@ -182,6 +196,7 @@ class TreeListener extends MappedEventSubscriber
 
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPreUpdate($om, $object);
+            $this->getCustomStrategy('materializedPath')->processPreUpdate($om, $object);
         }
     }
 
@@ -198,8 +213,10 @@ class TreeListener extends MappedEventSubscriber
         $object = $ea->getObject();
         $meta = $om->getClassMetadata(get_class($object));
 
+        // dump($om);
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPostPersist($om, $object, $ea);
+            $this->getCustomStrategy('materializedPath')->processPostPersist($om, $object, $ea);
         }
     }
 
@@ -218,6 +235,7 @@ class TreeListener extends MappedEventSubscriber
 
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPostUpdate($om, $object, $ea);
+            $this->getCustomStrategy('materializedPath')->processPostUpdate($om, $object, $ea);
         }
     }
 
@@ -236,22 +254,7 @@ class TreeListener extends MappedEventSubscriber
 
         if ($this->getConfiguration($om, $meta->name)) {
             $this->getStrategy($om, $meta->name)->processPostRemove($om, $object, $ea);
-        }
-    }
-
-    /**
-     * Mapps additional metadata
-     *
-     * @param EventArgs $eventArgs
-     */
-    public function loadClassMetadata(EventArgs $eventArgs)
-    {
-        $ea = $this->getEventAdapter($eventArgs);
-        $om = $ea->getObjectManager();
-        $meta = $eventArgs->getClassMetadata();
-        $this->loadMetadataForObjectClass($om, $meta);
-        if (isset(self::$configurations[$this->name][$meta->name]) && self::$configurations[$this->name][$meta->name]) {
-            $this->getStrategy($om, $meta->name)->processMetadataLoad($om, $meta);
+            $this->getCustomStrategy('materializedPath')->processPostRemove($om, $object, $ea);
         }
     }
 

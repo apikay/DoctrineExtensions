@@ -134,6 +134,52 @@ class Xml extends BaseXml
                     $config['path_append_id'] = $appendId;
                     $config['path_starts_with_separator'] = $startsWithSeparator;
                     $config['path_ends_with_separator'] = $endsWithSeparator;
+                } elseif (isset($mapping->{'tree-path-filtered'})) {
+                    if (!$validator->isValidFieldForPath($meta, $field)) {
+                        throw new InvalidMappingException("Tree Path Filtered field - [{$field}] type is not valid. It must be string or text in class - {$meta->name}");
+                    }
+
+                    $separator = $this->_getAttribute($mapping->{'tree-path-filtered'}, 'separator');
+
+                    if (strlen($separator) > 1) {
+                        throw new InvalidMappingException("Tree Path Filtered field - [{$field}] Separator {$separator} is invalid. It must be only one character long.");
+                    }
+
+                    $appendId = $this->_getAttribute($mapping->{'tree-path-filtered'}, 'append_id');
+
+                    if (!$appendId) {
+                        $appendId = true;
+                    } else {
+                        $appendId = strtolower($appendId) == 'false' ? false : true;
+                    }
+
+                    $startsWithSeparator = $this->_getAttribute($mapping->{'tree-path-filtered'}, 'starts_with_separator');
+
+                    if (!$startsWithSeparator) {
+                        $startsWithSeparator = false;
+                    } else {
+                        $startsWithSeparator = strtolower($startsWithSeparator) == 'false' ? false : true;
+                    }
+
+                    $endsWithSeparator = $this->_getAttribute($mapping->{'tree-path-filtered'}, 'ends_with_separator');
+
+                    if (!$endsWithSeparator) {
+                        $endsWithSeparator = true;
+                    } else {
+                        $endsWithSeparator = strtolower($endsWithSeparator) == 'false' ? false : true;
+                    }
+
+                    $filteredFields = $this->_getAttribute($mapping->{'tree-path-filtered'}, 'filtered_fields');
+                    if ($filteredFields) {
+                        $filteredFields = strtolower($filteredFields) == 'false' ? false : true;
+                    }
+
+                    $config['path_filtered'] = $field;
+                    $config['path_filtered_separator'] = $separator;
+                    $config['path_filtered_append_id'] = $appendId;
+                    $config['path_filtered_starts_with_separator'] = $startsWithSeparator;
+                    $config['path_filtered_ends_with_separator'] = $endsWithSeparator;
+                    $config['path_filtered_fields_to_be_filtered'] = $filteredFields;
                 } elseif (isset($mapping->{'tree-path-source'})) {
                     if (!$validator->isValidFieldForPathSource($meta, $field)) {
                         throw new InvalidMappingException("Tree PathSource field - [{$field}] type is not valid. It can be any of the integer variants, double, float or string in class - {$meta->name}");
@@ -257,7 +303,7 @@ class Xml extends BaseXml
                 if (is_array($meta->identifier) && count($meta->identifier) > 1) {
                     throw new InvalidMappingException("Tree does not support composite identifiers in class - {$meta->name}");
                 }
-                $method = 'validate'.ucfirst($config['strategy']).'TreeMetadata';
+                $method = 'validate' . ucfirst($config['strategy']) . 'TreeMetadata';
                 $validator->$method($meta, $config);
             } else {
                 throw new InvalidMappingException("Cannot find Tree type for class: {$meta->name}");

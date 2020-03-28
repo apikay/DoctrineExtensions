@@ -267,7 +267,7 @@ abstract class AbstractMaterializedPath implements Strategy
                 $identifier = $identifierProp->getValue($node);
             }
 
-            $path .= '-'.$identifier;
+            $path .= '-' . $identifier;
         }
 
         if ($parent) {
@@ -285,15 +285,15 @@ abstract class AbstractMaterializedPath implements Strategy
             // if parent path not ends with separator
             if ($parentPath[strlen($parentPath) - 1] !== $config['path_separator']) {
                 // add separator
-                $path = $pathProp->getValue($parent).$config['path_separator'].$path;
+                $path = $pathProp->getValue($parent) . $config['path_separator'] . $path;
             } else {
                 // don't add separator
-                $path = $pathProp->getValue($parent).$path;
+                $path = $pathProp->getValue($parent) . $path;
             }
         }
 
         if ($config['path_starts_with_separator'] && (strlen($path) > 0 && $path[0] !== $config['path_separator'])) {
-            $path = $config['path_separator'].$path;
+            $path = $config['path_separator'] . $path;
         }
 
         if ($config['path_ends_with_separator'] && ($path[strlen($path) - 1] !== $config['path_separator'])) {
@@ -351,6 +351,152 @@ abstract class AbstractMaterializedPath implements Strategy
         if (isset($config['path_hash'])) {
             $ea->setOriginalObjectProperty($uow, $oid, $config['path_hash'], $pathHash);
         }
+
+        $this->updateFilteredNode($om, $node, $ea);
+    }
+
+    public function updateFilteredNode(ObjectManager $om, $node, AdapterInterface $ea)
+    {
+        $oid = spl_object_hash($node);
+        $meta = $om->getClassMetadata(get_class($node));
+        $config = $this->listener->getConfiguration($om, $meta->name);
+        $uow = $om->getUnitOfWork();
+        $parentProp = $meta->getReflectionProperty($config['parent']);
+        $parentProp->setAccessible(true);
+        $parent = $parentProp->getValue($node);
+        $pathProp = $meta->getReflectionProperty($config['path_filtered']);
+        $pathProp->setAccessible(true);
+        $pathSourceProp = $meta->getReflectionProperty($config['path_source']);
+        $pathSourceProp->setAccessible(true);
+        $path = (string) $pathSourceProp->getValue($node);
+
+        $isPathAvailable = true;
+        $pathFilterPropKeys = array_keys($config['path_filtered_fields_to_be_filtered']);
+        foreach ($pathFilterPropKeys as $k) {
+            $requested = $config['path_filtered_fields_to_be_filtered'][$k];
+            $prop = $meta->getReflectionProperty($k);
+            $prop->setAccessible(true);
+            $val = $prop->getValue($node);
+            if ($val != $requested) {
+                $isPathAvailable = false;
+                $path = '';
+                break;
+            }
+        }
+
+        // We need to avoid the presence of the path separator in the path source
+        if (strpos($path, $config['path_filtered_separator']) !== false) {
+            $msg = 'You can\'t use the Path separator ("%s") as a character for your PathSource field value.';
+
+            throw new RuntimeException(sprintf($msg, $config['path_filtered_separator']));
+        }
+
+        $fieldMapping = $meta->getFieldMapping($config['path_source']);
+
+        // default behavior: if PathSource field is a string, we append the ID to the path
+        // path_append_id is true: always append id
+        // path_append_id is false: never append id
+        if ($config['path_filtered_append_id'] === true || ($fieldMapping['type'] === 'string' && $config['path_filtered_append_id'] !== false)) {
+            if (method_exists($meta, 'getIdentifierValue')) {
+                $identifier = $meta->getIdentifierValue($node);
+            } else {
+                $identifierProp = $meta->getReflectionProperty($meta->getSingleIdentifierFieldName());
+                $identifierProp->setAccessible(true);
+                $identifier = $identifierProp->getValue($node);
+            }
+
+            $path .= '-' . $identifier;
+        }
+
+        if ($parent) {
+            // Ensure parent has been initialized in the case where it's a proxy
+            $om->initializeObject($parent);
+
+            $changeSet = $uow->isScheduledForUpdate($parent) ? $ea->getObjectChangeSet($uow, $parent) : false;
+            $pathOrPathSourceHasChanged = $changeSet && (isset($changeSet[$config['path_source']]) || isset($changeSet[$config['path_filtered']]));
+
+            if ($pathOrPathSourceHasChanged || !$pathProp->getValue($parent)) {
+                $this->updateFilteredNode($om, $parent, $ea);
+            }
+
+            $parentPath = $pathProp->getValue($parent);
+            // if parent path not ends with separator
+            if ($parentPath != '' && $parentPath[strlen($parentPath) - 1] !== $config['path_filtered_separator']) {
+                // add separator
+                if ($isPathAvailable) {
+                    $path = $pathProp->getValue($parent) . $config['path_filtered_separator'] . $path;
+                } else {
+                    $path = $pathProp->getValue($parent);
+                }
+            } else {
+                // don't add separator
+                if ($isPathAvailable) {
+                    $path = $pathProp->getValue($parent) . $path;
+                } else {
+                    $path = $pathProp->getValue($parent);
+                }
+            }
+        }
+
+        if ($config['path_filtered_starts_with_separator'] && (strlen($path) > 0 && $path[0] !== $config['path_filtered_separator'])) {
+            $path = $config['path_filtered_separator'] . $path;
+        }
+
+        if ($config['path_filtered_ends_with_separator'] && ($path[strlen($path) - 1] !== $config['path_filtered_separator'])) {
+            $path .= $config['path_filtered_separator'];
+        }
+
+        $pathProp->setValue($node, $path);
+        $changes = array(
+            $config['path_filtered'] => array(null, $path),
+        );
+
+        if (isset($config['path_hash'])) {
+            $pathHash = md5($path);
+            $pathHashProp = $meta->getReflectionProperty($config['path_hash']);
+            $pathHashProp->setAccessible(true);
+            $pathHashProp->setValue($node, $pathHash);
+            $changes[$config['path_hash']] = array(null, $pathHash);
+        }
+
+        if (isset($config['root'])) {
+            $root = null;
+
+            // Define the root value by grabbing the top of the current path
+            $rootFinderPath = explode($config['path_filtered_separator'], $path);
+            $rootIndex = $config['path_filtered_starts_with_separator'] ? 1 : 0;
+            $root = $rootFinderPath[$rootIndex];
+
+            // If it is an association, then make it an reference
+            // to the entity
+            if ($meta->hasAssociation($config['root'])) {
+                $rootClass = $meta->getAssociationTargetClass($config['root']);
+                $root = $om->getReference($rootClass, $root);
+            }
+
+            $rootProp = $meta->getReflectionProperty($config['root']);
+            $rootProp->setAccessible(true);
+            $rootProp->setValue($node, $root);
+            $changes[$config['root']] = array(null, $root);
+        }
+
+        // if (isset($config['level'])) {
+        //     $level = substr_count($path, $config['path_filtered_separator']);
+        //     $levelProp = $meta->getReflectionProperty($config['level']);
+        //     $levelProp->setAccessible(true);
+        //     $levelProp->setValue($node, $level);
+        //     $changes[$config['level']] = array(null, $level);
+        // }
+
+        if (!$uow instanceof MongoDBUnitOfWork) {
+            $ea->setOriginalObjectProperty($uow, $oid, $config['path_filtered'], $path);
+            $uow->scheduleExtraUpdate($node, $changes);
+        } else {
+            $ea->recomputeSingleObjectChangeSet($uow, $meta, $node);
+        }
+        if (isset($config['path_hash'])) {
+            $ea->setOriginalObjectProperty($uow, $oid, $config['path_hash'], $pathHash);
+        }
     }
 
     /**
@@ -388,8 +534,7 @@ abstract class AbstractMaterializedPath implements Strategy
         $meta = $om->getClassMetadata(get_class($node));
         $config = $this->listener->getConfiguration($om, $meta->name);
 
-        if ($config['activate_locking']) {
-            ;
+        if ($config['activate_locking']) {;
             $parentProp = $meta->getReflectionProperty($config['parent']);
             $parentProp->setAccessible(true);
             $parentNode = $node;
@@ -480,8 +625,10 @@ abstract class AbstractMaterializedPath implements Strategy
                     throw new \InvalidArgumentException(sprintf('"%s" is not a valid action.', $action));
             }
 
-            if (empty($this->pendingObjectsToInsert) && empty($this->pendingObjectsToUpdate) &&
-                empty($this->pendingObjectsToRemove)) {
+            if (
+                empty($this->pendingObjectsToInsert) && empty($this->pendingObjectsToUpdate) &&
+                empty($this->pendingObjectsToRemove)
+            ) {
                 $this->releaseTreeLocks($om, $ea);
             }
         }

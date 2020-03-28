@@ -58,6 +58,8 @@ class Annotation extends AbstractAnnotationDriver
      */
     const PATH = 'Gedmo\\Mapping\\Annotation\\TreePath';
 
+    const PATH_FILTERED = 'Gedmo\\Mapping\\Annotation\\TreePathFiltered';
+
     /**
      * Annotation to specify path source class
      */
@@ -113,7 +115,8 @@ class Annotation extends AbstractAnnotationDriver
 
         // property annotations
         foreach ($class->getProperties() as $property) {
-            if ($meta->isMappedSuperclass && !$property->isPrivate() ||
+            if (
+                $meta->isMappedSuperclass && !$property->isPrivate() ||
                 $meta->isInheritedField($property->name) ||
                 isset($meta->associationMappings[$property->name]['inherited'])
             ) {
@@ -196,6 +199,25 @@ class Annotation extends AbstractAnnotationDriver
                 $config['path_starts_with_separator'] = $pathAnnotation->startsWithSeparator;
                 $config['path_ends_with_separator'] = $pathAnnotation->endsWithSeparator;
             }
+            // path filtered
+            if ($pathFilteredAnnotation = $this->reader->getPropertyAnnotation($property, self::PATH_FILTERED)) {
+                $field = $property->getName();
+                if (!$meta->hasField($field)) {
+                    throw new InvalidMappingException("Unable to find 'path' - [{$field}] as mapped property in entity - {$meta->name}");
+                }
+                if (!$validator->isValidFieldForPath($meta, $field)) {
+                    throw new InvalidMappingException("Tree Path Filtered field - [{$field}] type is not valid. It must be string or text in class - {$meta->name}");
+                }
+                if (strlen($pathFilteredAnnotation->separator) > 1) {
+                    throw new InvalidMappingException("Tree Path Filtered field - [{$field}] Separator {$pathFilteredAnnotation->separator} is invalid. It must be only one character long.");
+                }
+                $config['path_filtered'] = $field;
+                $config['path_filtered_separator'] = $pathFilteredAnnotation->separator;
+                $config['path_filtered_append_id'] = $pathFilteredAnnotation->appendId;
+                $config['path_filtered_starts_with_separator'] = $pathFilteredAnnotation->startsWithSeparator;
+                $config['path_filtered_ends_with_separator'] = $pathFilteredAnnotation->endsWithSeparator;
+                $config['path_filtered_fields_to_be_filtered'] = $pathFilteredAnnotation->filteredFields;
+            }
             // path source
             if ($this->reader->getPropertyAnnotation($property, self::PATH_SOURCE)) {
                 $field = $property->getName();
@@ -208,7 +230,7 @@ class Annotation extends AbstractAnnotationDriver
                 $config['path_source'] = $field;
             }
 
-             // path hash
+            // path hash
             if ($this->reader->getPropertyAnnotation($property, self::PATH_HASH)) {
                 $field = $property->getName();
                 if (!$meta->hasField($field)) {
@@ -242,7 +264,7 @@ class Annotation extends AbstractAnnotationDriver
                 if (is_array($meta->identifier) && count($meta->identifier) > 1) {
                     throw new InvalidMappingException("Tree does not support composite identifiers in class - {$meta->name}");
                 }
-                $method = 'validate'.ucfirst($config['strategy']).'TreeMetadata';
+                $method = 'validate' . ucfirst($config['strategy']) . 'TreeMetadata';
                 $validator->$method($meta, $config);
             } else {
                 throw new InvalidMappingException("Cannot find Tree type for class: {$meta->name}");
